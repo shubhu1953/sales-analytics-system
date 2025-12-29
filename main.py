@@ -11,140 +11,111 @@ from utils.data_processor import (
     top_selling_products,
     low_performing_products,
     customer_analysis,
+    generate_sales_report,
+)
+from utils.api_handler import (
+    fetch_all_products,
+    create_product_mapping,
+    enrich_sales_data,
+    save_enriched_data,
 )
 
 
-def money(n: float) -> str:
-    return f"{n:,.2f}"
-
-
 def main():
-    # Paths
-    data_file = Path("data") / "sales_data.txt"
-    output_dir = Path("output")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = output_dir / "report.txt"
+    try:
+        print("=" * 40)
+        print("SALES ANALYTICS SYSTEM")
+        print("=" * 40)
 
-    # -----------------------------
-    # Part 1.1: Read sales data
-    # -----------------------------
-    raw_lines = read_sales_data(str(data_file))
+        data_file = Path("data/sales_data.txt")
 
-    # -----------------------------
-    # Part 1.2: Parse and clean
-    # -----------------------------
-    transactions = parse_transactions(raw_lines)
+        # [1/10] Read sales data
+        print("\n[1/10] Reading sales data...")
+        raw_lines = read_sales_data(str(data_file))
+        print(f"✓ Successfully read {len(raw_lines)} transactions")
 
-    # -----------------------------
-    # Part 1.3: Validate and filter
-    # -----------------------------
-    valid_transactions, invalid_count, summary = validate_and_filter(
-        transactions,
-        region=None,
-        min_amount=None,
-        max_amount=None,
-    )
+        # [2/10] Parse and clean
+        print("\n[2/10] Parsing and cleaning data...")
+        transactions = parse_transactions(raw_lines)
+        print(f"✓ Parsed {len(transactions)} records")
 
-    # Required validation output format
-    print(f"Total records parsed: {summary['total_input']}")
-    print(f"Invalid records removed: {summary['invalid_records']}")
-    print(f"Valid records after cleaning: {summary['final_valid']}")
+        # [3/10] Show filter options
+        print("\n[3/10] Filter Options Available:")
+        regions = sorted({t["Region"] for t in transactions})
+        amounts = [t["Quantity"] * t["UnitPrice"] for t in transactions]
+        print(f"Regions: {', '.join(regions)}")
+        print(f"Amount Range: ₹{min(amounts):,.0f} - ₹{max(amounts):,.0f}")
 
-    # -----------------------------
-    # Part 2: Data Processing
-    # -----------------------------
-    total_revenue = calculate_total_revenue(valid_transactions)
-    region_stats = region_wise_sales(valid_transactions)
-    daily_trend = daily_sales_trend(valid_transactions)
-    peak_date, peak_revenue, peak_txn_count = find_peak_sales_day(valid_transactions)
-    top_products = top_selling_products(valid_transactions, n=5)
-    low_products = low_performing_products(valid_transactions, threshold=10)
-    customers = customer_analysis(valid_transactions)
+        choice = input("\nDo you want to filter data? (y/n): ").strip().lower()
 
-    # Helpful customer rollups
-    customer_count = len(customers)
-    top_customer_id, top_customer_spent = ("N/A", 0.0)
-    if customers:
-        top_customer_id, top_customer_spent = max(
-            ((cid, info["total_spent"]) for cid, info in customers.items()),
-            key=lambda x: x[1],
+        region = None
+        min_amount = None
+        max_amount = None
+
+        if choice == "y":
+            region = input("Enter region (or leave blank): ").strip() or None
+            min_amount = input("Enter minimum amount (or leave blank): ").strip()
+            max_amount = input("Enter maximum amount (or leave blank): ").strip()
+            min_amount = float(min_amount) if min_amount else None
+            max_amount = float(max_amount) if max_amount else None
+
+        # [4/10] Validate transactions
+        print("\n[4/10] Validating transactions...")
+        valid_transactions, invalid_count, summary = validate_and_filter(
+            transactions,
+            region=region,
+            min_amount=min_amount,
+            max_amount=max_amount,
         )
+        print(f"✓ Valid: {summary['final_valid']} | Invalid: {invalid_count}")
 
-    # -----------------------------
-    # Print a quick console summary
-    # -----------------------------
-    print("\n--- Part 2 Summary ---")
-    print(f"Total Revenue: {money(total_revenue)}")
-    print(f"Peak Sales Day: {peak_date} | Revenue: {money(peak_revenue)} | Transactions: {peak_txn_count}")
-    print(f"Top Customer: {top_customer_id} | Total Spent: {money(top_customer_spent)}")
+        # [5/10] Perform analysis (Part 2)
+        print("\n[5/10] Analyzing sales data...")
+        calculate_total_revenue(valid_transactions)
+        region_wise_sales(valid_transactions)
+        daily_sales_trend(valid_transactions)
+        find_peak_sales_day(valid_transactions)
+        top_selling_products(valid_transactions)
+        low_performing_products(valid_transactions)
+        customer_analysis(valid_transactions)
+        print("✓ Analysis complete")
 
-    # -----------------------------
-    # Write report.txt
-    # -----------------------------
-    lines = []
-    lines.append("SALES ANALYTICS REPORT")
-    lines.append("=" * 22)
-    lines.append("")
-    lines.append("VALIDATION OUTPUT")
-    lines.append(f"Total records parsed: {summary['total_input']}")
-    lines.append(f"Invalid records removed: {summary['invalid_records']}")
-    lines.append(f"Valid records after cleaning: {summary['final_valid']}")
-    lines.append("")
-    lines.append("PART 2: SALES SUMMARY")
-    lines.append(f"Total Revenue: {money(total_revenue)}")
-    lines.append("")
+        # [6/10] Fetch products from API
+        print("\n[6/10] Fetching product data from API...")
+        api_products = fetch_all_products()
+        print(f"✓ Fetched {len(api_products)} products")
 
-    lines.append("Region-wise Sales (sorted by total sales desc):")
-    for region, stats in region_stats.items():
-        lines.append(
-            f"- {region}: total_sales={money(stats['total_sales'])}, "
-            f"transactions={stats['transactions']}, "
-            f"percentage={stats['percentage']:.2f}%"
-        )
-    lines.append("")
+        # [7/10] Enrich sales data
+        print("\n[7/10] Enriching sales data...")
+        product_mapping = create_product_mapping(api_products)
+        enriched_transactions = enrich_sales_data(valid_transactions, product_mapping)
 
-    lines.append("Daily Sales Trend (sorted by date):")
-    for date, stats in daily_trend.items():
-        lines.append(
-            f"- {date}: revenue={money(stats['revenue'])}, "
-            f"transaction_count={stats['transaction_count']}, "
-            f"unique_customers={stats['unique_customers']}"
-        )
-    lines.append("")
+        enriched_count = sum(1 for t in enriched_transactions if t["API_Match"])
+        total_valid = len(enriched_transactions)
+        rate = (enriched_count / total_valid) * 100 if total_valid else 0
+        print(f"✓ Enriched {enriched_count}/{total_valid} transactions ({rate:.1f}%)")
 
-    lines.append("Peak Sales Day:")
-    lines.append(f"- {peak_date}: revenue={money(peak_revenue)}, transactions={peak_txn_count}")
-    lines.append("")
+        # [8/10] Save enriched data
+        print("\n[8/10] Saving enriched data...")
+        enriched_file = "data/enriched_sales_data.txt"
+        save_enriched_data(enriched_transactions, enriched_file)
+        print(f"✓ Saved to: {enriched_file}")
 
-    lines.append("Top Selling Products (by total quantity sold):")
-    for name, qty, rev in top_products:
-        lines.append(f"- {name}: total_quantity={qty}, total_revenue={money(rev)}")
-    lines.append("")
+        # [9/10] Generate report
+        print("\n[9/10] Generating report...")
+        report_file = "output/sales_report.txt"
+        generate_sales_report(valid_transactions, enriched_transactions, report_file)
+        print(f"✓ Report saved to: {report_file}")
 
-    lines.append("Low Performing Products (quantity < threshold):")
-    if low_products:
-        for name, qty, rev in low_products:
-            lines.append(f"- {name}: total_quantity={qty}, total_revenue={money(rev)}")
-    else:
-        lines.append("- None")
-    lines.append("")
+        # [10/10] Complete
+        print("\n[10/10] Process Complete!")
+        print("=" * 40)
 
-    lines.append("Customer Purchase Analysis:")
-    lines.append(f"- Unique customers: {customer_count}")
-    lines.append(f"- Top customer: {top_customer_id} (total_spent={money(top_customer_spent)})")
-    lines.append("")
-    lines.append("Top 5 customers by total_spent:")
-    top5_customers = sorted(
-        ((cid, info["total_spent"], info["purchase_count"], info["average_order_value"]) for cid, info in customers.items()),
-        key=lambda x: x[1],
-        reverse=True,
-    )[:5]
-    for cid, spent, count, aov in top5_customers:
-        lines.append(f"- {cid}: total_spent={money(spent)}, purchases={count}, avg_order_value={money(aov)}")
-    lines.append("")
-
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\nReport saved to: {report_path}")
+    except Exception as e:
+        print("\n❌ ERROR OCCURRED")
+        print("Something went wrong while running the program.")
+        print(f"Details: {e}")
+        print("Please check your input files and try again.")
 
 
 if __name__ == "__main__":

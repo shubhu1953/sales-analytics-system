@@ -325,3 +325,170 @@ def customer_analysis(transactions):
         del customers[cid]["products"]
 
     return customers
+
+    from datetime import datetime
+
+
+def generate_sales_report(transactions, enriched_transactions, output_file="output/sales_report.txt"):
+    """
+    Generates a comprehensive formatted text report
+    """
+
+    def money(n):
+        return f"{n:,.2f}"
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total_records = len(transactions)
+
+    # -----------------------------
+    # OVERALL SUMMARY
+    # -----------------------------
+    total_revenue = sum(t["Quantity"] * t["UnitPrice"] for t in transactions)
+    avg_order_value = total_revenue / total_records if total_records else 0
+
+    dates = [t["Date"] for t in transactions]
+    date_range = f"{min(dates)} to {max(dates)}" if dates else "N/A"
+
+    # -----------------------------
+    # REGION-WISE PERFORMANCE
+    # -----------------------------
+    region_stats = {}
+    for t in transactions:
+        region = t["Region"]
+        amount = t["Quantity"] * t["UnitPrice"]
+        if region not in region_stats:
+            region_stats[region] = {"sales": 0, "count": 0}
+        region_stats[region]["sales"] += amount
+        region_stats[region]["count"] += 1
+
+    for r in region_stats:
+        region_stats[r]["percentage"] = (region_stats[r]["sales"] / total_revenue) * 100 if total_revenue else 0
+
+    region_sorted = sorted(region_stats.items(), key=lambda x: x[1]["sales"], reverse=True)
+
+    # -----------------------------
+    # TOP 5 PRODUCTS
+    # -----------------------------
+    products = {}
+    for t in transactions:
+        name = t["ProductName"]
+        qty = t["Quantity"]
+        rev = t["Quantity"] * t["UnitPrice"]
+        if name not in products:
+            products[name] = {"qty": 0, "rev": 0}
+        products[name]["qty"] += qty
+        products[name]["rev"] += rev
+
+    top_products = sorted(products.items(), key=lambda x: x[1]["qty"], reverse=True)[:5]
+
+    # -----------------------------
+    # TOP 5 CUSTOMERS
+    # -----------------------------
+    customers = {}
+    for t in transactions:
+        cid = t["CustomerID"]
+        amt = t["Quantity"] * t["UnitPrice"]
+        if cid not in customers:
+            customers[cid] = {"spent": 0, "count": 0}
+        customers[cid]["spent"] += amt
+        customers[cid]["count"] += 1
+
+    top_customers = sorted(customers.items(), key=lambda x: x[1]["spent"], reverse=True)[:5]
+
+    # -----------------------------
+    # DAILY SALES TREND
+    # -----------------------------
+    daily = {}
+    for t in transactions:
+        d = t["Date"]
+        amt = t["Quantity"] * t["UnitPrice"]
+        if d not in daily:
+            daily[d] = {"rev": 0, "count": 0, "customers": set()}
+        daily[d]["rev"] += amt
+        daily[d]["count"] += 1
+        daily[d]["customers"].add(t["CustomerID"])
+
+    daily_sorted = sorted(daily.items())
+
+    # -----------------------------
+    # PRODUCT PERFORMANCE ANALYSIS
+    # -----------------------------
+    best_day = max(daily.items(), key=lambda x: x[1]["rev"])
+    low_products = [name for name, v in products.items() if v["qty"] < 10]
+
+    avg_txn_region = {
+        r: v["sales"] / v["count"] for r, v in region_stats.items()
+    }
+
+    # -----------------------------
+    # API ENRICHMENT SUMMARY
+    # -----------------------------
+    enriched_count = sum(1 for t in enriched_transactions if t.get("API_Match"))
+    success_rate = (enriched_count / len(enriched_transactions)) * 100 if enriched_transactions else 0
+
+    not_enriched = sorted(
+        {t["ProductName"] for t in enriched_transactions if not t.get("API_Match")}
+    )
+
+    # -----------------------------
+    # WRITE REPORT
+    # -----------------------------
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write("=" * 45 + "\n")
+        f.write("SALES ANALYTICS REPORT\n")
+        f.write(f"Generated: {now}\n")
+        f.write(f"Records Processed: {total_records}\n")
+        f.write("=" * 45 + "\n\n")
+
+        f.write("OVERALL SUMMARY\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"Total Revenue: ₹{money(total_revenue)}\n")
+        f.write(f"Total Transactions: {total_records}\n")
+        f.write(f"Average Order Value: ₹{money(avg_order_value)}\n")
+        f.write(f"Date Range: {date_range}\n\n")
+
+        f.write("REGION-WISE PERFORMANCE\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"{'Region':<10}{'Sales':>15}{'% of Total':>15}{'Transactions':>15}\n")
+        for r, v in region_sorted:
+            f.write(f"{r:<10}₹{money(v['sales']):>14}{v['percentage']:>14.2f}%{v['count']:>15}\n")
+        f.write("\n")
+
+        f.write("TOP 5 PRODUCTS\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"{'Rank':<6}{'Product':<25}{'Qty Sold':>10}{'Revenue':>15}\n")
+        for i, (name, v) in enumerate(top_products, 1):
+            f.write(f"{i:<6}{name:<25}{v['qty']:>10}₹{money(v['rev']):>14}\n")
+        f.write("\n")
+
+        f.write("TOP 5 CUSTOMERS\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"{'Rank':<6}{'Customer ID':<15}{'Total Spent':>15}{'Orders':>10}\n")
+        for i, (cid, v) in enumerate(top_customers, 1):
+            f.write(f"{i:<6}{cid:<15}₹{money(v['spent']):>14}{v['count']:>10}\n")
+        f.write("\n")
+
+        f.write("DAILY SALES TREND\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"{'Date':<12}{'Revenue':>15}{'Transactions':>15}{'Customers':>15}\n")
+        for d, v in daily_sorted:
+            f.write(f"{d:<12}₹{money(v['rev']):>14}{v['count']:>15}{len(v['customers']):>15}\n")
+        f.write("\n")
+
+        f.write("PRODUCT PERFORMANCE ANALYSIS\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"Best Selling Day: {best_day[0]} (₹{money(best_day[1]['rev'])})\n")
+        f.write(f"Low Performing Products: {', '.join(low_products) if low_products else 'None'}\n")
+        f.write("Average Transaction Value per Region:\n")
+        for r, avg in avg_txn_region.items():
+            f.write(f"- {r}: ₹{money(avg)}\n")
+        f.write("\n")
+
+        f.write("API ENRICHMENT SUMMARY\n")
+        f.write("-" * 45 + "\n")
+        f.write(f"Total Products Enriched: {enriched_count}\n")
+        f.write(f"Success Rate: {success_rate:.2f}%\n")
+        f.write("Products Not Enriched:\n")
+        for p in not_enriched:
+            f.write(f"- {p}\n")
+
