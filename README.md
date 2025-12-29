@@ -1,2 +1,5 @@
 # sales-analytics-system
-Graded Assignment 3
+
+Run with:
+
+python main.py
